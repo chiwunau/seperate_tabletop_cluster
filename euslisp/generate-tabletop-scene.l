@@ -6,6 +6,9 @@
 (setq *boundingbox-array-topic* "/cluster_decomposer_final/boxes")
 (setq *table* nil)
 (setq *boxes* nil)
+(setq *left-arm-candidates* nil)
+(setq *right-arm-candidates* nil)
+
 
 
 (defclass generate-polygon-array
@@ -181,6 +184,9 @@
   (setq *boxes* (send *gba* :get-boxes))
 
   (send *gpa* :draw-polygons (list *table*))
-  (send *gba* :draw-boxes *boxes*))
+  (send *gba* :draw-boxes *boxes*)
+  (setq *left-arm-candidates* (sort-boxes-by-dist-from *boxes* (send *pr2* :larm :end-coords)))
+  (setq *right-arm-candidates* (sort-boxes-by-dist-from *boxes* (send *pr2* :rarm :end-coords))))
+
 
 
