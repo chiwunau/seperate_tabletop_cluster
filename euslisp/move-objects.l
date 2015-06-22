@@ -7,9 +7,6 @@
     sorted-boxes))
   
 
-(setq *left-arm-candidates* (sort-boxes-by-dist-from *boxes* (send *pr2* :larm :end-coords)))
-(setq *right-arm-candidates* (sort-boxes-by-dist-from *boxes* (send *pr2* :rarm :end-coords)))
-
 (defun calc-push-coords-list (box)
   (let (cds-list
         cds-p cds-n)
@@ -45,12 +42,12 @@
   t)
 
 
-(defun push-objects ()
+(defun filter-pushing-cds (target-box other-boxes &optional (arm :larm))
   (let ((target-box (car *left-arm-candidates*))
         (other-boxes (cdr *left-arm-candidates*))
-        (insert-offset 30))
-        ;; target-cds-list)
-    (setq filter-target-cds-list nil)
+        (insert-offset 30)
+        target-cds-list
+        filter-target-cds-list)
 
     (setq target-cds-list (mapcar #'(lambda (cds)
                                       (send cds :translate (float-vector (* -1 insert-offset) 0 0))
@@ -64,10 +61,10 @@
       (block :go-next-cds
         (let ((cds-rotate? (list nil 0)))
           ;;not moving toward centrod
-          (if (< (rad2deg (vector-angle (send cds :z-axis) (v- (send *gba* :boxes-centroid) (send cds :worldpos)))) 90)
+          (if (< (rad2deg (vector-angle (send cds :z-axis) (v- (send *gba* :boxes-centroid) (send cds :worldpos)))) 80)
               (return-from :go-next-cds))
           ;;arm will not collide
-          (send *pr2* :inverse-kinematics cds :move-target (send *pr2* :larm :end-coords) :link-list (send *pr2* :link-list (send *pr2* :larm :end-coords :parent)) :use-torso t :debug-view t)
+          (send *pr2* :inverse-kinematics cds :move-target (send *pr2* :larm :end-coords) :link-list (send *pr2* :link-list (send *pr2* :larm :end-coords :parent)) :use-torso t :debug-view nil)
           (if (not (check-collision :larm))
               (progn
                 (send *pr2* :inverse-kinematics (send (send cds :copy-worldcoords) :rotate (deg2rad 180) :x) :move-target (send *pr2* :larm :end-coords) :link-list (send *pr2* :link-list (send *pr2* :larm :end-coords :parent)) :use-torso t)
@@ -77,19 +74,68 @@
           (print "check2")
           ;;no obstacle on path
           (let ((tmp-box (copy-object target-box)))
-            (send tmp-box :translate #f(0 0 50) :cds)
+            (send tmp-box :set-color :red)
+            (send tmp-box :translate #f(0 0 50) cds)
+            (objects tmp-box)
             (dolist (ob other-boxes)
               (if (eq (pqp-collision-check tmp-box ob) 1)
                   (return-from :go-next-cds)
-                (progn (send tmp-box :translate #f(0 0 50) :cds)
+                (progn (send tmp-box :translate #f(0 0 50) cds)
                        (if (eq (pqp-collision-check tmp-box ob) 1)
                            (return-from :go-next-cds))))))
           (print "check1")
           (setf (elt cds-rotate? 0) cds)
           (push cds-rotate? filter-target-cds-list))))
+    filter-target-cds-list))
+
+(defun push-boxes (&optional (arm :larm))
+  (let (final-cds-rotate?-list
+        target-box
+        other-boxes)
+    (setq target-box (car *left-arm-candidates*))
+    (setq other-boxes (cdr *left-arm-candidates*))
+    (setq final-cds-rotate?-list (filter-pushing-cds target-box other-boxes :larm))
+
+    (when final-cds-rotate?-list
+      (let* ((obj-cds (make-cascoords :coords (send (car (car final-cds-rotate?-list)) :copy-worldcoords)))
+             (tgt-cds (make-cascoords :coords (send obj-cds :copy-worldcoords)))
+             (rotate-gripper (cadr (car final-cds-rotate?-list))))
+        (if rotate-gripper (send tgt-cds :rotate (deg2rad 180) :x))
+        (send obj-cds :assoc tgt-cds)
+
+        (unless (send *pr2* :inverse-kinematics (send (send tgt-cds :copy-worldcoords) :translate #f(-100 0 0)) ;;prepare cds (higher than tgt-cds)
+                      :move-target (send *pr2* :larm :end-coords) :link-list (send *pr2* :link-list (send *pr2* :larm :end-coords :parent)) :use-torso t :debug-view nil)
+          (unless (send *pr2* :inverse-kinematics (send (send tgt-cds :copy-worldcoords) :translate #f(-50 0 0)) ;;prepare cds (higher than tgt-cds)
+                        :move-target (send *pr2* :larm :end-coords) :link-list (send *pr2* :link-list (send *pr2* :larm :end-coords :parent)) :use-torso t :debug-view t) (return))
+        (send *ri* :angle-vector (send *pr2* :angle-vector) 8000)
+        (print "move-to point 0")
+        (send *ri* :wait-interpolation)
+
+        (unless (send *pr2* :inverse-kinematics tgt-cds ;;prepare cds (higher than tgt-cds)
+              :move-target (send *pr2* :larm :end-coords) :link-list (send *pr2* :link-list (send *pr2* :larm :end-coords :parent)) :use-torso t :debug-view nil) (return))
+        (send *ri* :angle-vector (send *pr2* :angle-vector) 2000)
+        (print "move-to point 1")
+        (send *ri* :wait-interpolation)
+
+        (send obj-cds :translate #f(0 0 100))
+        (unless (send *pr2* :inverse-kinematics tgt-cds ;;prepare cds (higher than tgt-cds)
+                      :move-target (send *pr2* :larm :end-coords) :link-list (send *pr2* :link-list (send *pr2* :larm :end-coords :parent)) :use-torso t :debug-view nil) (return))
+        (send *ri* :angle-vector (send *pr2* :angle-vector) 5000)
+        (print "move-to point 3")
+        (send *ri* :wait-interpolation)))))
 
 
 
+
+
+
+        
+        
+                    
+       
+         
+        
+  
 
 
   
