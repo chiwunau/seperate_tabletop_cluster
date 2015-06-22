@@ -37,11 +37,20 @@
     (push cds-n cds-list)
     cds-list))
 
+(defun check-collision (&optional (arm :larm))
+  (dolist (link (append (send *pr2* arm :links) (send (send (send *pr2* :larm :end-coords :parent) :parent) :child-links)))
+    (dolist (box *boxes*)
+      (if (eq (pqp-collision-check link box) 1)
+          (return-from check-collision nil))))
+  t)
+
+
 (defun push-objects ()
   (let ((target-box (car *left-arm-candidates*))
         (other-boxes (cdr *left-arm-candidates*))
-        (insert-offset 15))
+        (insert-offset 30))
         ;; target-cds-list)
+    (setq filter-target-cds-list nil)
 
     (setq target-cds-list (mapcar #'(lambda (cds)
                                       (send cds :translate (float-vector (* -1 insert-offset) 0 0))
@@ -50,22 +59,40 @@
                                   (calc-push-coords-list target-box)))
 
     ;;filter target-cds-list
-    (dolist (cds (target-cds-list))
-      ;;not moving toward centrod
-      (if (< (rad2deg (vector-angle (send cds :z-axis) (v- (send *gba* :boxes-centroid) (send cds :worldpos)))) 90)
-          (return))
+    (dolist (cds target-cds-list)
+      (print cds)
+      (block :go-next-cds
+        (let ((cds-rotate? (list nil 0)))
+          ;;not moving toward centrod
+          (if (< (rad2deg (vector-angle (send cds :z-axis) (v- (send *gba* :boxes-centroid) (send cds :worldpos)))) 90)
+              (return-from :go-next-cds))
+          ;;arm will not collide
+          (send *pr2* :inverse-kinematics cds :move-target (send *pr2* :larm :end-coords) :link-list (send *pr2* :link-list (send *pr2* :larm :end-coords :parent)) :use-torso t :debug-view t)
+          (if (not (check-collision :larm))
+              (progn
+                (send *pr2* :inverse-kinematics (send (send cds :copy-worldcoords) :rotate (deg2rad 180) :x) :move-target (send *pr2* :larm :end-coords) :link-list (send *pr2* :link-list (send *pr2* :larm :end-coords :parent)) :use-torso t)
+                (if (not (check-collision :larm))
+                    (return-from :go-next-cds)
+                  (setf (elt cds-rotate? 1) 1))))
+          (print "check2")
+          ;;no obstacle on path
+          (let ((tmp-box (copy-object target-box)))
+            (send tmp-box :translate #f(0 0 50) :cds)
+            (dolist (ob other-boxes)
+              (if (eq (pqp-collision-check tmp-box ob) 1)
+                  (return-from :go-next-cds)
+                (progn (send tmp-box :translate #f(0 0 50) :cds)
+                       (if (eq (pqp-collision-check tmp-box ob) 1)
+                           (return-from :go-next-cds))))))
+          (print "check1")
+          (setf (elt cds-rotate? 0) cds)
+          (push cds-rotate? filter-target-cds-list))))
 
 
 
 
 
-
-(defun check-collision (&optional (arm :larm))
-  (dolist (link (append (send *pr2* arm :links) (send (send (send *pr2* :larm :end-coords :parent) :parent) :child-links)))
-    (dolist (box *boxes*)
-      (if (eq (pqp-collision-check link box) 1)
-          (return-from check-collision nil))))
-  t)
+  
       
           
   
