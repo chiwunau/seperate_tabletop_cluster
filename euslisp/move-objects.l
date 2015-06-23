@@ -43,9 +43,7 @@
 
 
 (defun filter-pushing-cds (target-box other-boxes &optional (arm :larm))
-  (let ((target-box (car *left-arm-candidates*))
-        (other-boxes (cdr *left-arm-candidates*))
-        (insert-offset 30)
+  (let ((insert-offset 30)
         target-cds-list
         filter-target-cds-list)
 
@@ -94,12 +92,19 @@
           (push cds-rotate? filter-target-cds-list))))
     filter-target-cds-list))
 
-(defun push-boxes (&optional (arm :larm))
-  (let (final-cds-rotate?-list
-        target-box
-        other-boxes)
-    (setq target-box (car *left-arm-candidates*))
-    (setq other-boxes (cdr *left-arm-candidates*))
+(defun seperate-scene ()
+  (dolist (target-box *left-arm-candidates*)
+    (let ((other-boxes (remove target-box *left-arm-candidates*)))
+        (push-boxes target-box other-boxes :larm))))
+            
+      
+
+(defun push-boxes (target-box other-boxes &optional (arm :larm))
+  (let (final-cds-rotate?-list)
+    ;;     target-box
+    ;;     other-boxes)
+    ;; (setq target-box (car *left-arm-candidates*))
+    ;; (setq other-boxes (cdr *left-arm-candidates*))
     (setq final-cds-rotate?-list (filter-pushing-cds target-box other-boxes :larm))
 
     (when final-cds-rotate?-list
@@ -128,7 +133,7 @@
                       :move-target (send *pr2* :larm :end-coords) :link-list (send *pr2* :link-list (send *pr2* :larm :end-coords :parent)) :use-torso t :debug-view nil) (return))
         (send *ri* :angle-vector (send *pr2* :angle-vector) 5000)
         (print "move-to point 3")
-        (send *ri* :wait-interpolation)))))
+        (send *ri* :wait-interpolation))))))
 
 
 
