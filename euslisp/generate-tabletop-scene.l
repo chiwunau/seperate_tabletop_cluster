@@ -2,12 +2,25 @@
 (ros::load-ros-manifest "jsk_recognition_msgs")
 (ros::roseus "generate-tabletop-scene")
 
+(require "package://pr2eus/pr2-interface.l")
+(if (not (boundp '*pr2*))
+    (pr2-init))
+(if (not (boundp '*irtviewer*))
+    (make-irtviewer))
+(send *irtviewer* :objects *pr2*)
+
 (setq *polygon-array-topic* "/multi_plane_estimate/output_refined_polygon")
-(setq *boundingbox-array-topic* "/cluster_decomposer_final/boxes")
+;;(setq *boundingbox-array-topic* "/cluster_decomposer_final/boxes")
+(setq *boundingbox-array-topic* "/point_cloud_scene_decomposer_cluster_points/boxes")
 (setq *table* nil)
 (setq *boxes* nil)
 (setq *left-arm-candidates* nil)
 (setq *right-arm-candidates* nil)
+(setq *push-style* :use-fingertip) ;;push-stype :use-fingertip / use-palm
+(setq *manip-pose* #f(296.291 54.9158 -1.3071 0.272882 -88.7191 -357.647 -5.7403 360.042 -45.3354 1.53671 2.39065 -95.778 -1.10987 -5.91148 359.972 7.46125 44.208))
+
+
+
 
 
 
@@ -148,18 +161,23 @@
 
   (:filter-boxes
    ()
-   (let (boxes-temp)
+   (let (boxes-temp
+         ground-pos)
      (dolist (b *box-list*)
-       (if (> (elt (send b :worldpos) 2) (elt (cadr (send *table* :centroid)) 2))
+       ;;filter boxes that are not on table
+       (setf (elt (setq ground-pos (send (send b :copy-worldcoords) :worldpos)) 2) 0)
+       (if (send *table* :intersect-line (send b :worldpos) ground-pos)
+         ;; (if (send *table* :intersect-point-vector (send b :worldpos) #f(0 0 -1))
+         ;;     (if (> (elt (send b :worldpos) 2) (elt (cadr (send *table* :centroid)) 2))
            (push b boxes-temp)))
      (setq *box-list* (reverse boxes-temp))))
 
   (:boxes-centroid
    ()
    (let ((sum #f(0 0 0)))
-     (dolist (b *box-list*)
+     (dolist (b *boxes*)
        (setq sum (v+ sum (send b :worldpos))))
-     (setq sum (scale (/ 1.0 (length *box-list*)) sum))
+     (setq sum (scale (/ 1.0 (length *boxes*)) sum))
      sum))
   )
 
