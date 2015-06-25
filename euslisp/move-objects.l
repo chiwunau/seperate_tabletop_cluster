@@ -123,17 +123,17 @@
       (send *ri* :wait-interpolation)
       
       (unix:usleep (* 1000 8000))
-    (update-scene)
-    (dolist (target-box *right-arm-candidates*)
-      (let ((other-boxes (remove target-box *right-arm-candidates*)))
-        (push-boxes target-box other-boxes :rarm)
-        (send sp :move-to (make-coords :pos (send *gba* :boxes-centroid)) :world)))
-    
-    (send *pr2* :angle-vector *manip-pose*)
-    (send *ri* :angle-vector *manip-pose* 5000)
-    (send *ri* :wait-interpolation)
-    (unix:usleep (* 1000 8000))
-    (update-scene)))
+      (update-scene)
+      (dolist (target-box *right-arm-candidates*)
+	(let ((other-boxes (remove target-box *right-arm-candidates*)))
+	  (push-boxes target-box other-boxes :rarm)
+	  (send sp :move-to (make-coords :pos (send *gba* :boxes-centroid)) :world)))
+      
+      (send *pr2* :angle-vector *manip-pose*)
+      (send *ri* :angle-vector *manip-pose* 5000)
+      (send *ri* :wait-interpolation)
+      (unix:usleep (* 1000 8000))
+      (update-scene))))
 
       
 
@@ -160,7 +160,7 @@
           (unless (setq pre-av (send *pr2* :inverse-kinematics (send (send tgt-cds :copy-worldcoords) :translate #f(0 0 50) :world) ;;prepare cds (higher than tgt-cds)
                                      :move-target (send *pr2* arm :end-coords) :link-list (send *pr2* :link-list (send *pr2* arm :end-coords :parent)) :use-torso 0 :rotation-axis t :debug-view nil)) (return-from push-boxes)))
         (send *ri* :angle-vector (send *pr2* :angle-vector) 2000)
-        (print "move-to point 0")s
+        (print "move-to point 0")
         (send *ri* :wait-interpolation)
 
         (unless (send *pr2* :inverse-kinematics tgt-cds ;;target-cds
