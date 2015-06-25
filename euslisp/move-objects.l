@@ -162,9 +162,7 @@
         
         (send *pr2* :angle-vector *manip-pose*)
         (send *ri* :angle-vector *manip-pose* 5000)
-        (send *ri* :wait-interpolation))
-      (unix:usleep (* 1000 500))))
-      
+        (send *ri* :wait-interpolation))))
 
 (defun push-boxes (target-box other-boxes &optional (arm :larm))
   (let (final-cds-rotate?-list
@@ -228,8 +226,6 @@
         (send target-box :translate (if (eq *push-style* :use-palm) #f(0 0 100) #f(100 0 0)) obj-cds)
         (setq *pushed-box* target-box)
         ))))
-
-
 
 
 
