@@ -1,6 +1,7 @@
 (ros::load-ros-manifest "roseus")
 (ros::load-ros-manifest "jsk_recognition_msgs")
-(ros::roseus "generate-tabletop-scene")
+(ros::load-ros-manifest "point_cloud_scene_decomposer")
+(ros::roseus "robot_pushing_motion_node")
 
 (require "package://pr2eus/pr2-interface.l")
 (if (not (boundp '*pr2*))
@@ -9,32 +10,57 @@
     (make-irtviewer))
 (send *irtviewer* :objects *pr2*)
 
-(setq *polygon-array-topic* "/multi_plane_estimate/output_refined_polygon")
-;;(setq *boundingbox-array-topic* "/cluster_decomposer_final/boxes")
-(setq *boundingbox-array-topic* "/point_cloud_scene_decomposer_cluster_points/boxes")
 (setq *table* nil)
 (setq *boxes* nil)
 (setq *left-arm-candidates* nil)
 (setq *right-arm-candidates* nil)
 (setq *push-style* :use-fingertip) ;;push-stype :use-fingertip / use-palm
 (setq *pushed-box* nil)
-(setq *manip-pose* #f(117.164 54.9158 -1.3071 0.272882 -88.7191 -357.647 -5.78018 360.042 -45.3354 1.53671 2.39065 -95.778 -1.10987 -5.93392 359.975 1.70125 46.872))
+(setq *manip-pose* #f(131.783 54.9158 -1.3071 0.272882 -88.7191 -357.653 -5.85497 360.042 -45.3354 1.53671 2.39065 -95.778 -1.10987 -5.93392 359.975 1.67125 48.912))
+
+;;#f(117.164 54.9158 -1.3071 0.272882 -88.7191 -357.647 -5.78018 360.042 -45.3354 1.53671 2.39065 -95.778 -1.10987 -5.93392 359.975 1.70125 46.872) lower pose
 ;;#f(296.291 54.9158 -1.3071 0.272882 -88.7191 -357.647 -5.7403 360.042 -45.3354 1.53671 2.39065 -95.778 -1.10987 -5.91148 359.972 7.46125 44.208) higher pose
 
 (send *ri* :angle-vector *manip-pose*)
 (send *ri* :start-grasp)
+(setq *tfl* (instance ros::transform-listener :init))
 
+;;report to recognition node
+(ros::advertise "/robot_pushing_motion_node/pushed_box_index" std_msgs::Int64 1)
+(ros::advertise "/robot_pushing_motion_node/pushed_box_assumed_pose" geometry_msgs::PoseStamped 1)
+
+
+(defun report-to-recognition-node ()
+  (let ((idx (instance std_msgs::Int64 :init))
+        (final-pose (instance geometry_msgs::PoseStamped :init))
+        trans)
+    (if *pushed-box*
+        (progn
+          (send idx :data (position *pushed-box* (send *gba* :get-all-boxes)))
+          (send final-pose :header :stamp (ros::time-now))
+          (send final-pose :header :frame_id "/openni_rgb_optical_frame")
+          (setq trans (send *tfl* :lookup-transform  "/openni_rgb_optical_frame" "/base_footprint"(ros::time 0)))
+          (send final-pose :pose (ros::coords->tf-pose (send (send *pushed-box* :copy-worldcoords) :transform trans :world)))
+          (ros::publish "/robot_pushing_motion_node/pushed_box_index" idx)
+          (ros::publish "/robot_pushing_motion_node/pushed_box_assumed_pose" final-pose))
+      (progn
+        (send idx :data -1)
+        (send final-pose :header :stamp (ros::time-now))
+        (send final-pose :header :frame_id "/openni_rgb_optical_frame")
+        (ros::publish "/robot_pushing_motion_node/pushed_box_index" idx)
+        (ros::publish "/robot_pushing_motion_node/pushed_box_assumed_pose" final-pose)))))
+
+  
 
 
 (defclass generate-polygon-array
   :slots 
-  (*vertices-list-org* *plane-normal-list* *latest-polygon-list* *polygon-list* *cloud-stamp* *cloud-centroid-list* *plgs-cb-flag* *cofs-cb-flag* *tfl*))
+  (*vertices-list-org* *plane-normal-list* *latest-polygon-list* *polygon-list* *cloud-stamp* *cloud-centroid-list* *plgs-cb-flag* *cofs-cb-flag*))
 
 (defmethod generate-polygon-array
   (:init 
    ()
-   (ros::subscribe *polygon-array-topic* jsk_recognition_msgs::PolygonArray #'send self :polygon-array-cb)
-   (setq *tfl* (instance ros::transform-listener :init)))
+   (ros::subscribe *polygon-array-topic* jsk_recognition_msgs::PolygonArray #'send self :polygon-array-cb))
 
   (:polygon-array-cb
    (msg)
@@ -157,11 +183,15 @@
    ()
    (setq *box-list* (copy-object *latest-box-list*)))
 
-  (:get-boxes
+  (:get-all-boxes
    ()
    *box-list*)
+  
+  (:get-tabletop-boxes
+   ()
+   *filter-boxes*)
 
-  (:filter-boxes
+  (:filter-tabletop-boxes
    ()
    (let (boxes-temp
          ground-pos)
@@ -172,7 +202,7 @@
          ;; (if (send *table* :intersect-point-vector (send b :worldpos) #f(0 0 -1))
          ;;     (if (> (elt (send b :worldpos) 2) (elt (cadr (send *table* :centroid)) 2))
            (push b boxes-temp)))
-     (setq *box-list* (reverse boxes-temp))))
+     (setq *filter-boxes* (reverse boxes-temp))))
 
   (:boxes-centroid
    ()
@@ -181,6 +211,7 @@
        (setq sum (v+ sum (send b :worldpos))))
      (setq sum (scale (/ 1.0 (length *boxes*)) sum))
      sum))
+
   )
 
 
@@ -189,6 +220,7 @@
   (setq *gba* (instance generate-boundingbox-array :init)))
 
 (defun update-scene ()
+  (setq *pushed-box* nil)
   (send *pr2* :angle-vector (send *ri* :state :potentio-vector))
   (send *irtviewer* :objects (list *pr2*))
   (setq *table* nil)
@@ -200,8 +232,8 @@
       (ros::spin-once)))
   (send *gpa* :sort-polygons-by-dist-from-head)
   (setq *table* (car (send *gpa* :get-polygons)))
-  (send *gba* :filter-boxes)
-  (setq *boxes* (send *gba* :get-boxes))
+  (send *gba* :filter-tabletop-boxes)
+  (setq *boxes* (send *gba* :get-tabletop-boxes))
 
   (send *gpa* :draw-polygons (list *table*))
   (send *gba* :draw-boxes *boxes*)
