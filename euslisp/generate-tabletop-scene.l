@@ -17,10 +17,12 @@
 (setq *left-arm-candidates* nil)
 (setq *right-arm-candidates* nil)
 (setq *push-style* :use-fingertip) ;;push-stype :use-fingertip / use-palm
-(setq *manip-pose* #f(296.291 54.9158 -1.3071 0.272882 -88.7191 -357.647 -5.7403 360.042 -45.3354 1.53671 2.39065 -95.778 -1.10987 -5.91148 359.972 7.46125 44.208))
+(setq *pushed-box* nil)
+(setq *manip-pose* #f(117.164 54.9158 -1.3071 0.272882 -88.7191 -357.647 -5.78018 360.042 -45.3354 1.53671 2.39065 -95.778 -1.10987 -5.93392 359.975 1.70125 46.872))
+;;#f(296.291 54.9158 -1.3071 0.272882 -88.7191 -357.647 -5.7403 360.042 -45.3354 1.53671 2.39065 -95.778 -1.10987 -5.91148 359.972 7.46125 44.208) higher pose
 
-
-
+(send *ri* :angle-vector *manip-pose*)
+(send *ri* :start-grasp)
 
 
 
@@ -204,7 +206,33 @@
   (send *gpa* :draw-polygons (list *table*))
   (send *gba* :draw-boxes *boxes*)
   (setq *left-arm-candidates* (sort-boxes-by-dist-from *boxes* (send *pr2* :larm :end-coords)))
-  (setq *right-arm-candidates* (sort-boxes-by-dist-from *boxes* (send *pr2* :rarm :end-coords))))
+  (setq *right-arm-candidates* (sort-boxes-by-dist-from *boxes* (send *pr2* :rarm :end-coords)))
+  (setq *boxes-small-to-big* (sort (copy-seq *boxes*) #'(lambda (b1 b2)
+                                                        (if (<= (send b1 :volume) (send b2 :volume))
+                                                            t))))
+  (setq *boxes-on-table* nil)
+  (dolist (b *boxes*)
+    (if (<= (smallest-dist-to-table b) 50)
+        (push b *boxes-on-table*))))
+
+
+(defun smallest-dist-to-table (box &optional (table *table*))
+  (let ((smallest-dist 10000))
+    (dolist (f (send box :faces))
+      (let (dist)
+        (setq dist (abs (- (elt (cadr (send f :centroid)) 2) (elt (cadr (send *table* :centroid)) 2))))
+        (if (<= dist smallest-dist)
+            (setq smallest-dist dist))))
+    smallest-dist))
+
+(defun sort-boxes-by-dist-from (boxes cds)
+  (let ((sorted-boxes (copy-seq boxes)))
+    (sort sorted-boxes #'(lambda (b1 b2)
+                           (if (<= (abs (norm (v- (send cds :worldpos) (send b1 :worldpos))))
+                                   (abs (norm (v- (send cds :worldpos) (send b2 :worldpos)))))
+                               t)))
+    sorted-boxes))
+
 
 
 
