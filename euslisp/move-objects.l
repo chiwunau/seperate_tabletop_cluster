@@ -28,7 +28,7 @@
 (defun check-collision (&optional (arm :larm))
   (let (res)
     (dolist (link (append (send *pr2* arm :links) (send (send (send *pr2* arm :end-coords :parent) :parent) :child-links)))
-      (dolist (box *boxes*)
+      (dolist (box *unknown-boxes*)
         (setq res (pqp-collision-check link box))
         (when (eq res 1)
           (ros::ros-warn (format nil "check arm collision failed:~A~%" res))
@@ -64,7 +64,7 @@
               collided)
 
           ;;not moving toward centrod
-          (if (>= (abs (rad2deg (vector-angle (send cds :z-axis) (v- (send *gba* :boxes-centroid) (send cds :worldpos))))) 80)
+          (if (>= (abs (rad2deg (vector-angle (send cds :z-axis) (v- (send *gba-unknown* :boxes-centroid) (send cds :worldpos))))) 80)
               ;;arm will not collide
               (progn
                 (print "toward centroid checked")
@@ -113,12 +113,12 @@
     (if (= (mod i 2) 0)
         (setq *push-style* :use-fingertip)
       (setq *push-style* :use-palm))
-    (let ((sp (make-sphere 20 :pos (send *gba* :boxes-centroid))))
+    (let ((sp (make-sphere 20 :pos (send *gba-unknown* :boxes-centroid))))
       (send *irtviewer* :objects sp)
       (dolist (target-box *left-arm-candidates*)
         (let ((other-boxes (remove target-box *left-arm-candidates*)))
           (push-boxes target-box other-boxes :larm)
-          (send sp :move-to (make-coords :pos (send *gba* :boxes-centroid)) :world)))
+          (send sp :move-to (make-coords :pos (send *gba-unknown* :boxes-centroid)) :world)))
     
       (send *pr2* :angle-vector *manip-pose*)
       (send *ri* :angle-vector *manip-pose* 5000)
@@ -129,7 +129,7 @@
       (dolist (target-box *right-arm-candidates*)
 	(let ((other-boxes (remove target-box *right-arm-candidates*)))
 	  (push-boxes target-box other-boxes :rarm)
-	  (send sp :move-to (make-coords :pos (send *gba* :boxes-centroid)) :world)))
+	  (send sp :move-to (make-coords :pos (send *gba-unknown* :boxes-centroid)) :world)))
       
       (send *pr2* :angle-vector *manip-pose*)
       (send *ri* :angle-vector *manip-pose* 5000)
@@ -141,28 +141,38 @@
   (setq *pushed-box* nil)
   (setq *push-style* :use-fingertip)
 
-  (let ((sp (make-sphere 20 :pos (send *gba* :boxes-centroid))))
+  (send *pr2* :angle-vector *manip-pose-high*)
+  (send *ri* :angle-vector *manip-pose* 5000)
+  (send *ri* :wait-interpolation)
+
+
+  (let ((sp (make-sphere 20 :pos (send *gba-unknown* :boxes-centroid))))
     (send *irtviewer* :objects sp)
-    (dolist (target-box *boxes-small-to-big*)
-      (let ((other-boxes (remove target-box *boxes-small-to-big*)))
+    (dolist (target-box *manipulate-boxes*)
+      (let ((other-boxes (append *known-boxes* (remove target-box *manipulate-boxes*))))
         (push-boxes target-box other-boxes :larm)
-        (send sp :move-to (make-coords :pos (send *gba* :boxes-centroid)) :world)
+        (send sp :move-to (make-coords :pos (send *gba-unknown* :boxes-centroid)) :world)
         (if *pushed-box* (return))))
     
-      (send *pr2* :angle-vector *manip-pose*)
-      (send *ri* :angle-vector *manip-pose* 5000)
-      (send *ri* :wait-interpolation)
-      
+    (send *pr2* :angle-vector *manip-pose-high*)
+    (send *ri* :angle-vector *manip-pose* 5000)
+    (send *ri* :wait-interpolation)
+    
       (unless *pushed-box*
         (dolist (target-box *boxes-small-to-big*)
           (let ((other-boxes (remove target-box *boxes-small-to-big*)))
             (push-boxes target-box other-boxes :rarm)
-            (send sp :move-to (make-coords :pos (send *gba* :boxes-centroid)) :world)
-            (if *pushed-box* (return))))
+            (send sp :move-to (make-coords :pos (send *gba-unknown* :boxes-centroid)) :world)
+            (if *pushed-box* (return)))
+
+          (send *pr2* :angle-vector *manip-pose-high*)
+          (send *ri* :angle-vector *manip-pose* 5000)
+          (send *ri* :wait-interpolation)))
+
         
         (send *pr2* :angle-vector *manip-pose*)
         (send *ri* :angle-vector *manip-pose* 5000)
-        (send *ri* :wait-interpolation))))
+        (send *ri* :wait-interpolation)))
 
 (defun push-boxes (target-box other-boxes &optional (arm :larm))
   (let (final-cds-rotate?-list
