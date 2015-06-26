@@ -6,7 +6,9 @@
 
 (setq *polygon-array-topic* "/multi_plane_estimate/output_refined_polygon")
 ;;(setq *boundingbox-array-topic* "/cluster_decomposer_final/boxes")
-(setq *boundingbox-array-topic* "/point_cloud_scene_decomposer_cluster_points/boxes")
+(setq *unknown-boundingbox-array-topic* "/point_cloud_scene_decomposer_cluster_points/unknown_boxes")
+(setq *known-boundingbox-array-topic* "/point_cloud_scene_decomposer_cluster_points/known_boxes")
+
 
 
 (require "package://pr2eus/pr2-interface.l")
@@ -52,10 +54,10 @@
         (unix:usleep (* 1000 10000))
         (ros::ros-warn "Robot Finish working, send a report!")
         (report-to-recognition-node)
-        (ros::publish "/scene_decomposer/output/signal" report-signal)))
+        (ros::publish "/robot_pushing_motion_node/signal" report-signal)))
     (ros::sleep)))
 
-(ros::advertise "/scene_decomposer/output/signal" point_cloud_scene_decomposer::signal 1)
+(ros::advertise "/robot_pushing_motion_node/output/signal" point_cloud_scene_decomposer::signal 1)
 (ros::subscribe "/scene_decomposer/output/signal" point_cloud_scene_decomposer::signal #'signal-cb)
 
         
