@@ -44,8 +44,8 @@
     
     (ros::ros-warn (format nil "checking box:~A~%" target-box))
     ;;filter out if box not on table
-    (unless (member target-box *boxes-on-table*)
-      (return-from filter-pushing-cds))
+    ;; (unless (member target-box *boxes-on-table*)
+    ;;   (return-from filter-pushing-cds))
 
     (setq target-cds-list (mapcar #'(lambda (cds)
                                       (send cds :translate (float-vector (* -1 insert-offset) 0 0))
@@ -149,7 +149,7 @@
   (let ((sp (make-sphere 20 :pos (send *gba-unknown* :boxes-centroid))))
     (send *irtviewer* :objects sp)
     (dolist (target-box *manipulate-boxes*)
-      (let ((other-boxes (append *known-boxes* (remove target-box *manipulate-boxes*))))
+      (let ((other-boxes (append *known-boxes* (remove target-box *unknown-boxes-on-table*))))
         (push-boxes target-box other-boxes :larm)
         (send sp :move-to (make-coords :pos (send *gba-unknown* :boxes-centroid)) :world)
         (if *pushed-box* (return))))
@@ -159,8 +159,8 @@
     (send *ri* :wait-interpolation)
     
       (unless *pushed-box*
-        (dolist (target-box *boxes-small-to-big*)
-          (let ((other-boxes (remove target-box *boxes-small-to-big*)))
+        (dolist (target-box *manipulate-boxes*)
+          (let ((other-boxes (append *known-boxes* (remove target-box *unknown-boxes-on-table*))))
             (push-boxes target-box other-boxes :rarm)
             (send sp :move-to (make-coords :pos (send *gba-unknown* :boxes-centroid)) :world)
             (if *pushed-box* (return)))
@@ -209,8 +209,9 @@
         (unless (send *pr2* :inverse-kinematics tgt-cds ;;after-push-cds
                       :move-target (send *pr2* arm :end-coords) :link-list (send *pr2* :link-list (send *pr2* arm :end-coords :parent)) :use-torso 0 :rotation-axis t :debug-view nil :warnp nil) (return-from push-boxes))
         (push (send *pr2* :angle-vector) av-list)
+        (setq *final-tip-pose* (send *pr2* arm :end-coords :copy-worldcoords))
         (print "point 2 ik-solved")
-        
+
         
         ;;robot-start-moving
         (setq av-list (reverse av-list))
