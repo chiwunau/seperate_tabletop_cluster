@@ -6,10 +6,8 @@
 
 (setq *polygon-array-topic* "/multi_plane_estimate/output_refined_polygon")
 ;;(setq *boundingbox-array-topic* "/cluster_decomposer_final/boxes")
-(setq *unknown-boundingbox-array-topic* "/point_cloud_scene_decomposer_cluster_points/unknown_boxes")
-(setq *known-boundingbox-array-topic* "/point_cloud_scene_decomposer_cluster_points/known_boxes")
-
-
+(setq *unknown-boundingbox-array-topic* "/point_cloud_scene_decomposer_cluster_points/boxes")
+(setq *known-boundingbox-array-topic* "/manipulated_cluster/output/known_bounding_boxes")
 
 (require "package://pr2eus/pr2-interface.l")
 (load "generate-tabletop-scene.l")
@@ -48,13 +46,15 @@
       (push-one-time)
       (let ((report-signal (instance point_cloud_scene_decomposer::signal :init)))
         (send report-signal :header :stamp (ros::time-now))
-        (send report-signal :command 3)
+        (if *pushed-box*
+            (send report-signal :command 3)
+          (send report-signal :command -1))
         (send report-signal :counter *counter*)
         (incf *private-counter*)
         (unix:usleep (* 1000 10000))
         (ros::ros-warn "Robot Finish working, send a report!")
         (report-to-recognition-node)
-        (ros::publish "/robot_pushing_motion_node/signal" report-signal)))
+        (ros::publish "/robot_pushing_motion_node/output/signal" report-signal)))
     (ros::sleep)))
 
 (ros::advertise "/robot_pushing_motion_node/output/signal" point_cloud_scene_decomposer::signal 1)
