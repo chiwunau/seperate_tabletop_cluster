@@ -19,7 +19,8 @@
 (setq *push-style* :use-fingertip) ;;push-stype :use-fingertip / use-palm
 (setq *pushed-box* nil)
 (setq *manip-pose* #f(131.783 54.9158 -1.3071 0.272882 -88.7191 -357.653 -5.85497 360.042 -45.3354 1.53671 2.39065 -95.778 -1.10987 -5.93392 359.975 1.67125 48.912))
-(setq *box-size-thres* (* 500 500 500))
+(setq *box-size-thres* 0);;(* 500 500 500))
+(setq *final-tip-pose* nil)
 
 ;;#f(117.164 54.9158 -1.3071 0.272882 -88.7191 -357.647 -5.78018 360.042 -45.3354 1.53671 2.39065 -95.778 -1.10987 -5.93392 359.975 1.70125 46.872) lower pose
 (setq *manip-pose-high* #f(296.291 54.9158 -1.3071 0.272882 -88.7191 -357.647 -5.7403 360.042 -45.3354 1.53671 2.39065 -95.778 -1.10987 -5.91148 359.972 7.46125 44.208)) ;;higher pose
@@ -31,27 +32,34 @@
 ;;report to recognition node
 (ros::advertise "/robot_pushing_motion_node/pushed_box_index" std_msgs::Int64 1)
 (ros::advertise "/robot_pushing_motion_node/pushed_box_assumed_pose" geometry_msgs::PoseStamped 1)
+(ros::advertise "/robot_pushing_motion_node/final_tip_pose" geometry_msgs::PoseStamped 1)
 
 
 (defun report-to-recognition-node ()
   (let ((idx (instance std_msgs::Int64 :init))
         (final-pose (instance geometry_msgs::PoseStamped :init))
+        (final-tip-pose (instance geometry_msgs::PoseStamped :init))
         trans)
     (if *pushed-box*
         (progn
-          (send idx :data (position *pushed-box* (send *unknown-gba* :get-all-boxes)))
+          (send idx :data (position *pushed-box* (send *gba-unknown* :get-all-boxes)))
           (send final-pose :header :stamp (ros::time-now))
           (send final-pose :header :frame_id "/openni_rgb_optical_frame")
+          (send final-tip-pose :header :stamp (ros::time-now))
+          (send final-tip-pose :header :frame_id "/openni_rgb_optical_frame")
           (setq trans (send *tfl* :lookup-transform  "/openni_rgb_optical_frame" "/base_footprint"(ros::time 0)))
           (send final-pose :pose (ros::coords->tf-pose (send (send *pushed-box* :copy-worldcoords) :transform trans :world)))
+          (send final-tip-pose :pose (ros::coords->tf-pose (send (send *pushed-box* :copy-worldcoords) :transform trans :world)))
           (ros::publish "/robot_pushing_motion_node/pushed_box_index" idx)
-          (ros::publish "/robot_pushing_motion_node/pushed_box_assumed_pose" final-pose))
+          (ros::publish "/robot_pushing_motion_node/pushed_box_assumed_pose" final-pose)
+          (ros::publish "/robot_pushing_motion_node/final_tip_pose" final-tip-pose))
       (progn
         (send idx :data -1)
         (send final-pose :header :stamp (ros::time-now))
         (send final-pose :header :frame_id "/openni_rgb_optical_frame")
         (ros::publish "/robot_pushing_motion_node/pushed_box_index" idx)
-        (ros::publish "/robot_pushing_motion_node/pushed_box_assumed_pose" final-pose)))))
+        (ros::publish "/robot_pushing_motion_node/pushed_box_assumed_pose" final-pose)
+        (ros::publish "/robot_pushing_motion_node/final_tip_pose" final-tip-pose)))))
 
 
 (defclass generate-polygon-array
@@ -180,6 +188,12 @@
    (send *irtviewer* :objects (append (send *irtviewer* :objects) boxes))
    (send *irtviewer* :draw-objects :flush t))
 
+  (:draw-obstacle-boxes
+   (boxes)
+   (dolist (b boxes)
+     (send b :set-color :black)
+     (send *irtviewer* :objects b)))
+
   (:update-boxes
    ()
    (setq *box-list* (copy-object *latest-box-list*)))
@@ -190,7 +204,7 @@
   
   (:get-tabletop-boxes
    ()
-   (send self :filter-table-top-boxes)
+   (send self :filter-tabletop-boxes)
    *filter-boxes*)
 
   (:filter-tabletop-boxes
@@ -228,6 +242,7 @@
   (send *irtviewer* :objects (list *pr2*))
   (setq *table* nil)
   (setq *unknown-boxes* nil)
+  (setq *known-boxes* nil)
   (while t
     (ros::spin-once)
     (if (and (send *gpa* :update-polygons) (send *gba-unknown* :update-boxes))
@@ -241,10 +256,10 @@
   (setq *all-boxes* (append *unknown-boxes* *known-boxes*))
 
   (send *gpa* :draw-polygons (list *table*))
-  (send *gba-unknown* :draw-boxes *unknown-boxes*)
-  (send *gba-known* :draw-boxes *known-boxes*)
-  (setq *left-arm-candidates* (sort-boxes-by-dist-from *unknown-boxes* (send *pr2* :larm :end-coords)))
-  (setq *right-arm-candidates* (sort-boxes-by-dist-from *unknown-boxes* (send *pr2* :rarm :end-coords)))
+  ;;(send *gba-unknown* :draw-boxes *unknown-boxes*)
+  ;;(send *gba-known* :draw-obstacle-boxes *known-boxes*)
+  ;; (setq *left-arm-candidates* (sort-boxes-by-dist-from *unknown-boxes* (send *pr2* :larm :end-coords)))
+  ;; (setq *right-arm-candidates* (sort-boxes-by-dist-from *unknown-boxes* (send *pr2* :rarm :end-coords)))
   (setq *unknown-boxes-small-to-big* (sort (copy-seq *unknown-boxes*) #'(lambda (b1 b2)
                                                         (if (<= (send b1 :volume) (send b2 :volume))
                                                             t))))
@@ -255,12 +270,17 @@
 
   ;;boxes for pr2 to manipulate
   (setq *manipulate-boxes* nil)
-  (dolist (b (*unknown-boxes-small-to-big*))
-    (if (and (<= (send b :volume) *box-size-thres*)
-             (member b *unknow-boxes-on-table*)
-             (not (intersect-with-known-boxes b))
-        (push b *manipulate-boxes*)))
-  (setq *manipulate-boxes* (reverse *manipulate-boxes*))))
+  (setq *not-manipulate-boxes* nil)
+  (dolist (b *unknown-boxes-small-to-big*)
+    (if (and (>= (send b :volume) *box-size-thres*)
+             (member b *unknown-boxes-on-table*)
+             (not (intersect-with-known-boxes b)))
+        (push b *manipulate-boxes*)
+      (push b *not-manipulate-boxes*)))
+  (setq *manipulate-boxes* (reverse *manipulate-boxes*))
+  (send *gba-known* :draw-obstacle-boxes *known-boxes*)
+  (send *gba-unknown* :draw-obstacle-boxes *not-manipulate-boxes*)
+  (send *gba-unknown* :draw-boxes *manipulate-boxes*))
 
 (defun intersect-with-known-boxes (box)
   (dolist (kb *known-boxes*)
