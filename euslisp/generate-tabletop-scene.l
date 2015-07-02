@@ -19,8 +19,10 @@
 (setq *push-style* :use-fingertip) ;;push-stype :use-fingertip / use-palm
 (setq *pushed-box* nil)
 (setq *manip-pose* #f(131.783 54.9158 -1.3071 0.272882 -88.7191 -357.653 -5.85497 360.042 -45.3354 1.53671 2.39065 -95.778 -1.10987 -5.93392 359.975 1.67125 48.912))
-(setq *box-size-thres* 0);;(* 500 500 500))
+(setq *box-size-thres* (* 50 50 50));;(* 500 500 500))
 (setq *final-tip-pose* nil)
+(setq *num-euclidean-boxes* 1)
+(setq *pushed-times* 0)
 
 ;;#f(117.164 54.9158 -1.3071 0.272882 -88.7191 -357.647 -5.78018 360.042 -45.3354 1.53671 2.39065 -95.778 -1.10987 -5.93392 359.975 1.70125 46.872) lower pose
 (setq *manip-pose-high* #f(296.291 54.9158 -1.3071 0.272882 -88.7191 -357.647 -5.7403 360.042 -45.3354 1.53671 2.39065 -95.778 -1.10987 -5.91148 359.972 7.46125 44.208)) ;;higher pose
@@ -77,7 +79,6 @@
    (setq *plgs-cb-flag* t)
    (setq *cloud-stamp* (send msg :header :stamp))
    (let ((plg-list (send msg :polygons)))
-
      (setq *vertices-list-org* (mapcar #'(lambda (plg)
                                            (let ((pts (send (send plg :polygon) :points))
                                                  pts-list
@@ -96,6 +97,7 @@
      ;;       (send c :transform (send *pr2* :copy-worldcoords) :world)
      ;;       (push  (send c :copy-worldcoords) centroid-list))))
      ;; (setq *cloud-centroid-list* (reverse centroid-list))
+     (print "test")
      (send self :init-eus-polygons)))
   
   (:init-eus-polygons
@@ -124,7 +126,7 @@
                (let* (;;(color (float-vector (random 1.0) (random 1.0) (random 1.0)))
                       (color #f(0.87 0.72 0.53)) ;;burlywood color
                       (prism (make-prism (mapcar #'(lambda (p) (scale 1 p)) (send plg :vertices)) (send plg :normal)))
-                      (sphere (make-sphere 20)))
+                      (sphere (make-sphere 50)))
                  (send sphere :move-to ct :world)
                  (send sphere :set-color :white)
                  (send prism :set-color color)
@@ -158,7 +160,7 @@
 
 (defclass generate-boundingbox-array
   :slots
-  (*latest-box-list* *box-list* *boxs-stamp*))
+  (*latest-box-list* *box-list* *filter-boxes* *boxs-stamp*))
 
 (defmethod generate-boundingbox-array
   (:init
@@ -196,7 +198,8 @@
 
   (:update-boxes
    ()
-   (setq *box-list* (copy-object *latest-box-list*)))
+   (setq *box-list* (copy-object *latest-box-list*))
+   (send self :filter-tabletop-boxes))
 
   (:get-all-boxes
    ()
@@ -204,7 +207,6 @@
   
   (:get-tabletop-boxes
    ()
-   (send self :filter-tabletop-boxes)
    *filter-boxes*)
 
   (:filter-tabletop-boxes
@@ -222,10 +224,12 @@
 
   (:boxes-centroid
    ()
-   (let ((sum #f(0 0 0)))
+   (let ((sum #f(0 0 0))
+         (sum-vol 0))
      (dolist (b *unknown-boxes*)
-       (setq sum (v+ sum (send b :worldpos))))
-     (setq sum (scale (/ 1.0 (length *unknown-boxes*)) sum))
+       (setq sum (v+ sum (scale (send b :volume) (send b :worldpos))))
+       (setq sum-vol (+ sum-vol (send b :volume))))
+     (setq sum (scale (/ 1.0 sum-vol) sum))
      sum))
 
   )
@@ -234,32 +238,50 @@
 (defun init-scene ()
   (setq *gpa* (instance generate-polygon-array :init))
   (setq *gba-unknown* (instance generate-boundingbox-array :init *unknown-boundingbox-array-topic*))
-  (setq *gba-known* (instance generate-boundingbox-array :init *known-boundingbox-array-topic*)))
+  (setq *gba-known* (instance generate-boundingbox-array :init *known-boundingbox-array-topic*))
+  (setq *num-euclidean-boxes* 1)
+  (setq *pushed-times* 0)
+  (setq *known-boxes* nil))
+  
 
+(setq *known-boxes* nil)
 (defun update-scene ()
+  (setq *check-finish* nil)
   (setq *pushed-box* nil)
   (send *pr2* :angle-vector (send *ri* :state :potentio-vector))
   (send *irtviewer* :objects (list *pr2*))
   (setq *table* nil)
-  (setq *unknown-boxes* nil)
-  (setq *known-boxes* nil)
+  (setq *unknown-boxes* nil)  
   (while t
     (ros::spin-once)
-    (if (and (send *gpa* :update-polygons) (send *gba-unknown* :update-boxes))
-        (return)
-      (ros::spin-once)))
-  (send *gba-known* :update-boxes)
+    (ros::warn "waiting for update~%")
+    (if (send *gpa* :update-polygons)
+        (return)))
+  (ros::warn "escape")
   (send *gpa* :sort-polygons-by-dist-from-head)
   (setq *table* (car (send *gpa* :get-polygons)))
+  (send *gba-unknown* :update-boxes)
+  (send *gba-known* :update-boxes)
   (setq *unknown-boxes* (send *gba-unknown* :get-tabletop-boxes))
-  (setq *known-boxes* (send *gba-known* :get-tabletop-boxes))
+  ;;(setq *known-boxes* (send *gba-known* :get-tabletop-boxes))
+  (let (tmp-boxes) ;;new known boxs
+    (if (> *pushed-times* 0)
+        (progn
+          (if (> (length (send *gba-known* :get-tabletop-boxes)) *num-euclidean-boxes*)
+              (progn
+                (setq tmp-boxes (sort-boxes-by-dist-from (send *gba-known* :get-tabletop-boxes) *final-tip-pose*))
+                (setq *known-boxes* (append (list (car tmp-boxes)) *known-boxes*))
+                (setq *num-euclidean-boxes* (length (send *gba-known* :get-tabletop-boxes))))
+            (progn 
+            (setq *check-finish* t))))))
+    
   (setq *all-boxes* (append *unknown-boxes* *known-boxes*))
-
+  
   (send *gpa* :draw-polygons (list *table*))
   ;;(send *gba-unknown* :draw-boxes *unknown-boxes*)
   ;;(send *gba-known* :draw-obstacle-boxes *known-boxes*)
-  ;; (setq *left-arm-candidates* (sort-boxes-by-dist-from *unknown-boxes* (send *pr2* :larm :end-coords)))
-  ;; (setq *right-arm-candidates* (sort-boxes-by-dist-from *unknown-boxes* (send *pr2* :rarm :end-coords)))
+  (setq *left-arm-candidates* (sort-boxes-by-dist-from *unknown-boxes* (send *pr2* :larm :end-coords)))
+  (setq *right-arm-candidates* (sort-boxes-by-dist-from *unknown-boxes* (send *pr2* :rarm :end-coords)))
   (setq *unknown-boxes-small-to-big* (sort (copy-seq *unknown-boxes*) #'(lambda (b1 b2)
                                                         (if (<= (send b1 :volume) (send b2 :volume))
                                                             t))))
@@ -271,7 +293,7 @@
   ;;boxes for pr2 to manipulate
   (setq *manipulate-boxes* nil)
   (setq *not-manipulate-boxes* nil)
-  (dolist (b *unknown-boxes-small-to-big*)
+  (dolist (b *left-arm-candidates*)
     (if (and (>= (send b :volume) *box-size-thres*)
              (member b *unknown-boxes-on-table*)
              (not (intersect-with-known-boxes b)))
@@ -280,14 +302,16 @@
   (setq *manipulate-boxes* (reverse *manipulate-boxes*))
   (send *gba-known* :draw-obstacle-boxes *known-boxes*)
   (send *gba-unknown* :draw-obstacle-boxes *not-manipulate-boxes*)
-  (send *gba-unknown* :draw-boxes *manipulate-boxes*))
-
+  (send *gba-unknown* :draw-boxes *manipulate-boxes*)
+  (if *check-finish* (return-from update-scene "nonewbox")))
+  
 (defun intersect-with-known-boxes (box)
   (dolist (kb *known-boxes*)
-    (let (c)
-      (setq c (body- box kb))
-      (if (<= (/ (send c :volume) (send box :volume)) 0.5)
-          (return-from check-intersect-with-known-boxes t))))
+    (let (conv-body diff)
+      (setq conv-body (convex-hull-3d (append (send box :vertices) (send kb :vertices))))
+      (setq diff (- (send conv-body :volume) (+ (send box :volume) (send kb :volume))))
+      (if (<= (/ diff (send box :volume)) -0.2)
+          (return-from intersect-with-known-boxes t))))
   nil)
 
 
@@ -301,6 +325,8 @@
     smallest-dist))
 
 (defun sort-boxes-by-dist-from (boxes cds)
+  (unless cds
+    (return-from sort-boxes-by-dist-from boxes))
   (let ((sorted-boxes (copy-seq boxes)))
     (sort sorted-boxes #'(lambda (b1 b2)
                            (if (<= (abs (norm (v- (send cds :worldpos) (send b1 :worldpos))))

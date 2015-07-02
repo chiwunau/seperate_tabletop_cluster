@@ -25,15 +25,22 @@
     (push cds-n cds-list)
     cds-list))
 
-(defun check-collision (&optional (arm :larm))
+(defun check-collision (&optional (arm :larm) (boxes *unknown-boxes-on-table*))
   (let (res)
     (dolist (link (append (send *pr2* arm :links) (send (send (send *pr2* arm :end-coords :parent) :parent) :child-links)))
-      (dolist (box *unknown-boxes*)
+      (dolist (box boxes)
         (setq res (pqp-collision-check link box))
         (when (eq res 1)
           (ros::ros-warn (format nil "check arm collision failed:~A~%" res))
           (return-from check-collision nil))))
   t))
+
+(defun get-boxes-centroid (boxes)
+  (let ((sum #f(0 0 0)))
+    (dolist (b boxes)
+      (setq sum (v+ sum (send b :worldpos))))
+    (setq sum (scale (/ 1.0 (length boxes)) sum))
+    sum))
 
 
 (defun filter-pushing-cds (target-box other-boxes &optional (arm :larm))
@@ -64,7 +71,9 @@
               collided)
 
           ;;not moving toward centrod
-          (if (>= (abs (rad2deg (vector-angle (send cds :z-axis) (v- (send *gba-unknown* :boxes-centroid) (send cds :worldpos))))) 80)
+          (if (>= (abs (rad2deg (vector-angle (matrix-column (send cds :rot) (if (eq *push-style* :use-palm) 2 0))  (v- (send *gba-unknown* :boxes-centroid) (send target-box :worldpos))))) 90)
+          ;; (if (>= (abs (rad2deg (vector-angle (matrix-column (send cds :rot) (if (eq *push-style* :use-palm) 2 0))  (v- (get-boxes-centroid *manipulate-boxes*) (send cds :worldpos))))) 80)
+
               ;;arm will not collide
               (progn
                 (print "toward centroid checked")
@@ -72,11 +81,11 @@
                 (if (not ik-solved)
                     (progn
                       (print "ik-not-solved")
-                      (setq ik-solved (send *pr2* :inverse-kinematics (send (send cds :copy-worldcoords) :rotate (deg2rad 180) :x) :move-target (send *pr2* arm :end-coords) :link-list (send *pr2* :link-list (send *pr2* arm :end-coords :parent)) :use-torso 0 :rotation-axis t :debug-view nil :warnp nil))))
+                      (setq ik-solved (send *pr2* :inverse-kinematics (send (send cds :copy-worldcoords) :rotate (deg2rad 180) :x) :move-target (send *pr2* arm :end-coords) :link-list (send *pr2* :link-list (send *pr2* arm :end-coords :parent)) :use-torso 0 :rotation-axis t :debug-view nil :warnp nil))
+                      (setf (elt cds-rotate? 1) 1)))
                 (send *irtviewer* :draw-objects :flush t)
-                (if (and ik-solved (check-collision arm))
+                (if (and ik-solved (check-collision arm other-boxes))
                     (progn
-                      (setf (elt cds-rotate? 1) 1)
                       (print "arm collision checked")
                       ;;no obstacle on path
                       (let ((tmp-box (copy-object target-box)))
@@ -85,27 +94,28 @@
                         (send tmp-box :translate (if (eq *push-style* :use-palm) #f(0 0 50) #f(50 0 0)) cds)
                         (print "hello")
                         (objects tmp-box)
-                        (if nil ;;other-boxes ;;if there are other boxes
+                        (if *known-boxes*;;other-boxes ;;if there are other boxes
                             (progn
                               (print "there are other boxes")
-                              (dolist (ob other-boxes)
+                              (dolist (ob *known-boxes*)
                                 (setq collided (if (> (pqp-collision-check tmp-box ob) 0) t nil))
                                 (if collided (return)))))
                         (if (not collided) ;;no collision
                             (progn
                               (send tmp-box :translate (if (eq *push-style* :use-palm) #f(0 0 50) #f(50 0 0)) cds)
                               (send *irtviewer* :draw-objects :flush t)
-                              (setq collided nil)
-                              (if other-boxes
+                              (if *known-boxes*
                                   (dolist (ob other-boxes)
                                     (setq collided (if (and (> (pqp-collision-check tmp-box ob) 0) t nil)))
                                     (if collided (return))))
-                              (if t ;;(not collided) ;;no collison
+                              (if (not collided) ;;no collison
                                   (progn
                                     (print "on path collision checked")
                                     (setf (elt cds-rotate? 0) cds)
                                     (push cds-rotate? filter-target-cds-list)))))
-                        (send *irtviewer* :objects (delete tmp-box (send *irtviewer* :objects) :count 1)))))))))
+                              (send *irtviewer* :draw-objects :flush t)
+                              (send *irtviewer* :objects (delete tmp-box (send *irtviewer* :objects) :count 1)))))))))
+    (send *irtviewer* :draw-objects :flush t)
     filter-target-cds-list))
 
 (defun push-until-stop ()
@@ -139,24 +149,25 @@
 
 (defun push-one-time ()
   (setq *pushed-box* nil)
-  (setq *push-style* :use-fingertip)
+  ;;(setq *push-style* :use-fingertip)
 
   (send *pr2* :angle-vector *manip-pose-high*)
   (send *ri* :angle-vector *manip-pose* 5000)
   (send *ri* :wait-interpolation)
 
 
-  (let ((sp (make-sphere 20 :pos (send *gba-unknown* :boxes-centroid))))
+  (let ((sp (make-sphere 50)))
     (send *irtviewer* :objects sp)
     (dolist (target-box *manipulate-boxes*)
       (let ((other-boxes (append *known-boxes* (remove target-box *unknown-boxes-on-table*))))
+          ;;((other-boxes *known-boxes*))
         (push-boxes target-box other-boxes :larm)
         (send sp :move-to (make-coords :pos (send *gba-unknown* :boxes-centroid)) :world)
         (if *pushed-box* (return))))
     
     (send *pr2* :angle-vector *manip-pose-high*)
-    (send *ri* :angle-vector *manip-pose* 5000)
-    (send *ri* :wait-interpolation)
+    ;; (send *ri* :angle-vector *manip-pose* 5000)
+    ;; (send *ri* :wait-interpolation)
     
       (unless *pushed-box*
         (dolist (target-box *manipulate-boxes*)
@@ -183,6 +194,7 @@
     ;; (setq other-boxes (cdr *left-arm-candidates*))
     (setq final-cds-rotate?-list (filter-pushing-cds target-box other-boxes arm))
     
+    (setq *hoge* final-cds-rotate?-list)
     (when final-cds-rotate?-list
       (print "robot-start-moving")
       (print final-cds-rotate?-list)
@@ -205,7 +217,7 @@
         (push (send *pr2* :angle-vector) av-list)
         (print "point 1 ik-solved")
         
-        (send obj-cds :translate (if (eq *push-style* :use-palm) #f(0 0 100) #f(100 0 0)))
+        (send obj-cds :translate (if (eq *push-style* :use-palm) #f(0 0 150) #f(150 0 0)))
         (unless (send *pr2* :inverse-kinematics tgt-cds ;;after-push-cds
                       :move-target (send *pr2* arm :end-coords) :link-list (send *pr2* :link-list (send *pr2* arm :end-coords :parent)) :use-torso 0 :rotation-axis t :debug-view nil :warnp nil) (return-from push-boxes))
         (push (send *pr2* :angle-vector) av-list)
