@@ -317,8 +317,10 @@
     (let (conv-body diff)
       (setq conv-body (convex-hull-3d (append (send box :vertices) (send kb :vertices))))
       (setq diff (- (send conv-body :volume) (+ (send box :volume) (send kb :volume))))
-      (if (<= (/ diff (send box :volume)) -0.3)
-          (return-from intersect-with-known-boxes t))))
+      (if (<= (/ diff (send box :volume)) -0.15)
+          (progn
+            (print (/ diff (send box :volume)))
+            (return-from intersect-with-known-boxes t)))))
   nil)
 
 
