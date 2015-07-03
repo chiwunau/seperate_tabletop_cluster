@@ -181,7 +181,7 @@
                               (cds (ros::tf-pose->coords (send box :pose))))
                          (send cds :transform trans :world)
                          (send cube :move-to cds)
-                         (send cube :set-color (float-vector (random 1.0) (random 1.0) (random 1.0)))
+                         (send cube :set-color :white);;(float-vector (random 1.0) (random 1.0) (random 1.0)))
                          cube))
                    boxes))))
 
@@ -264,16 +264,17 @@
   (send *gba-known* :update-boxes)
   (setq *unknown-boxes* (send *gba-unknown* :get-tabletop-boxes))
   ;;(setq *known-boxes* (send *gba-known* :get-tabletop-boxes))
-  (let (tmp-boxes) ;;new known boxs
-    (if (> *pushed-times* 0)
-        (progn
-          (if (> (length (send *gba-known* :get-tabletop-boxes)) *num-euclidean-boxes*)
-              (progn
-                (setq tmp-boxes (sort-boxes-by-dist-from (send *gba-known* :get-tabletop-boxes) *final-tip-pose*))
-                (setq *known-boxes* (append (list (car tmp-boxes)) *known-boxes*))
-                (setq *num-euclidean-boxes* (length (send *gba-known* :get-tabletop-boxes))))
-            (progn 
-            (setq *check-finish* t))))))
+  ;;(let (tmp-boxes) ;;new known boxs
+    ;; (if (> *pushed-times* 0)
+    ;;     (progn
+          ;; (if (> (length (send *gba-known* :get-tabletop-boxes)) *num-euclidean-boxes*)
+          ;;     (progn
+    ;;(setq tmp-boxes (sort-boxes-by-dist-from (send *gba-known* :get-tabletop-boxes) *final-tip-pose*))
+  (setq *known-boxes* (send *gba-known* :get-tabletop-boxes))
+  ;;(setq *known-boxes* (append (list (car tmp-boxes)) *known-boxes*))
+  ;;(setq *num-euclidean-boxes* (length (send *gba-known* :get-tabletop-boxes))))
+            ;; (progn 
+            ;; (setq *check-finish* t))))))
     
   (setq *all-boxes* (append *unknown-boxes* *known-boxes*))
   
@@ -283,34 +284,40 @@
   (setq *left-arm-candidates* (sort-boxes-by-dist-from *unknown-boxes* (send *pr2* :larm :end-coords)))
   (setq *right-arm-candidates* (sort-boxes-by-dist-from *unknown-boxes* (send *pr2* :rarm :end-coords)))
   (setq *unknown-boxes-small-to-big* (sort (copy-seq *unknown-boxes*) #'(lambda (b1 b2)
-                                                        (if (<= (send b1 :volume) (send b2 :volume))
-                                                            t))))
+                                                                          (if (<= (send b1 :volume) (send b2 :volume))
+                                                                              t))))
   (setq *unknown-boxes-on-table* nil)
   (dolist (b *unknown-boxes*)
     (if (<= (smallest-dist-to-table b) 50)
         (push b *unknown-boxes-on-table*)))
 
+  (setq *unknown-boxes-close-to-far* (sort (copy-seq *unknown-boxes-small-to-big*) #'(lambda (b1 b2)
+                                                                                       (if (<= (elt (send b1 :worldpos) 0) (elt (send b2 :worldpos) 0))
+                                                                                           t))))
+                                                                                       
+
   ;;boxes for pr2 to manipulate
   (setq *manipulate-boxes* nil)
   (setq *not-manipulate-boxes* nil)
-  (dolist (b *left-arm-candidates*)
+  (dolist (b *unknown-boxes-close-to-far*)
     (if (and (>= (send b :volume) *box-size-thres*)
              (member b *unknown-boxes-on-table*)
              (not (intersect-with-known-boxes b)))
         (push b *manipulate-boxes*)
       (push b *not-manipulate-boxes*)))
   (setq *manipulate-boxes* (reverse *manipulate-boxes*))
-  (send *gba-known* :draw-obstacle-boxes *known-boxes*)
+  ;;(send *gba-known* :draw-obstacle-boxes *known-boxes*)
   (send *gba-unknown* :draw-obstacle-boxes *not-manipulate-boxes*)
-  (send *gba-unknown* :draw-boxes *manipulate-boxes*)
-  (if *check-finish* (return-from update-scene "nonewbox")))
+  (send *gba-unknown* :draw-boxes *manipulate-boxes*))
+
+  ;;(if *check-finish* (return-from update-scene "nonewbox")))
   
 (defun intersect-with-known-boxes (box)
   (dolist (kb *known-boxes*)
     (let (conv-body diff)
       (setq conv-body (convex-hull-3d (append (send box :vertices) (send kb :vertices))))
       (setq diff (- (send conv-body :volume) (+ (send box :volume) (send kb :volume))))
-      (if (<= (/ diff (send box :volume)) -0.2)
+      (if (<= (/ diff (send box :volume)) -0.3)
           (return-from intersect-with-known-boxes t))))
   nil)
 
